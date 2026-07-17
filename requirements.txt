@@ -1,0 +1,16 @@
+# Phase 1 (pipeline foundation)
+nba_api>=1.5.2
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0
+duckdb>=0.10
+
+# Phase 2 (uncomment as you reach each layer)
+# dagster>=1.7          # orchestration
+# dagster-webserver>=1.7
+# xgboost>=2.0          # data-science model
+# scikit-learn>=1.4
+# shap>=0.45            # model explainability
+# streamlit>=1.35       # analyst dashboard
+# fastapi>=0.111        # AI-engineer serving layer
+# uvicorn>=0.30

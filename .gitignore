@@ -1,0 +1,17 @@
+# Data artifacts (regenerable by the pipeline)
+data/bronze/
+data/silver/
+data/gold/
+*.duckdb
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
