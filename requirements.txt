@@ -14,3 +14,5 @@ duckdb>=0.10
 # streamlit>=1.35       # analyst dashboard
 # fastapi>=0.111        # AI-engineer serving layer
 # uvicorn>=0.30
+plotly>=5.20
+streamlit>=1.35
