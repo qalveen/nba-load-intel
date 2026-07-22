@@ -6,6 +6,7 @@ engineers a domain-informed **player-load** metric, predicts near-term
 live decision dashboard — orchestrated and scheduled like a production system.
 
 **Live dashboard:** https://calvin-nba-load.streamlit.app/
+
 **Stack:** Python · pandas · scikit-learn · DuckDB · Dagster · Streamlit · Plotly
 
 ---
@@ -19,24 +20,20 @@ The platform spans four disciplines in one codebase: data engineering, data
 science, analytics, and ML engineering — on a single coherent problem.
 
 ## Architecture
-nba_api (stats.nba.com)                 [ orchestrated by Dagster ]
-|  rate-limited + retry/backoff        nightly schedule + checks
-v
-+----------+   +----------+   +----------+   +--------------+
-|  BRONZE  |-->|  SILVER  |-->|   GOLD   |-->|    DuckDB     |
-| raw pull |   | cleaned  |   |  ACWR    |   |  warehouse    |
-| (parquet)|   | deduped  |   |  metrics |   +------+--------+
-+----------+   +----------+   +----+-----+          |
-|                 v
-+--------v--------+   +--------------+
-|  model_table    |   |  Streamlit   |
-|  features+label |   |  dashboard   |
-+--------+--------+   |  (risk board)|
-v            +------^-------+
-+-----------------+          |
-|  GBM risk model |----------+
-|  -> risk scores |  predicted risk
-+-----------------+
+
+```mermaid
+flowchart LR
+    API[nba_api<br/>stats.nba.com] --> BRONZE[Bronze<br/>raw pull]
+    BRONZE --> SILVER[Silver<br/>cleaned, deduped]
+    SILVER --> GOLD[Gold<br/>ACWR metrics]
+    GOLD --> WH[(DuckDB<br/>warehouse)]
+    GOLD --> FEAT[model_table<br/>features + label]
+    FEAT --> MODEL[GBM risk model<br/>risk scores]
+    WH --> DASH[Streamlit dashboard<br/>risk board]
+    MODEL --> DASH
+```
+
+Orchestrated by **Dagster** as an asset graph with data-quality checks and a nightly schedule.
 
 ## The load metric (ACWR)
 
