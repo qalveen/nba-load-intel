@@ -127,7 +127,7 @@ if scored is not None:
     })
     st.dataframe(
         latest.style.format({"ACWR": "{:.2f}", "Min": "{:.0f}", "Risk %": "{:.1f}"})
-        .map(_color_flag, subset=["Flag"])
+        .map(_color_flag, subset=["Flag"]),
         use_container_width=True, hide_index=True,
     )
 else:
