@@ -1,18 +1,15 @@
-"""Player Load Intelligence — Streamlit dashboard (Data Analyst layer).
+"""Player Load Intelligence — Streamlit dashboard.
 
-Reads the gold player_load table from DuckDB and turns it into a
-stakeholder-facing view: current risk board, per-player load trends, and the
-league-wide flag distribution.
+Filters cascade: Season -> Team -> Player. Risk board is model-driven when the
+scored table is present; otherwise falls back to the ACWR load flag.
 
-Run from the project root:
-    streamlit run dashboard/app.py
+Run:  streamlit run dashboard/app.py
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import duckdb
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -38,6 +35,16 @@ def load_data() -> pd.DataFrame:
     return df
 
 
+@st.cache_data
+def load_scored():
+    path = config.DATA_DIR / "features" / "scored.parquet"
+    if not path.exists():
+        return None
+    s = pd.read_parquet(path)
+    s["GAME_DATE"] = pd.to_datetime(s["GAME_DATE"])
+    return s
+
+
 try:
     data = load_data()
 except Exception as e:
@@ -48,65 +55,98 @@ except Exception as e:
     )
     st.stop()
 
+scored = load_scored()
+
+# --- Cascading filters: Season -> Team -> Player ----------------------------
 st.sidebar.header("Filters")
+
 seasons = sorted(data["SEASON"].unique())
 season = st.sidebar.selectbox("Season", ["All"] + seasons, index=len(seasons))
+dseason = data if season == "All" else data[data["SEASON"] == season]
 
-df = data if season == "All" else data[data["SEASON"] == season]
+teams = sorted(dseason["TEAM_ABBREVIATION"].dropna().unique())
+team = st.sidebar.selectbox("Team", ["All"] + list(teams))
+df = dseason if team == "All" else dseason[dseason["TEAM_ABBREVIATION"] == team]
 
 players = sorted(df["PLAYER_NAME"].unique())
-default_player = "LeBron James" if "LeBron James" in players else players[0]
-player = st.sidebar.selectbox("Player", players, index=players.index(default_player))
+default_idx = players.index("LeBron James") if "LeBron James" in players else 0
+player = st.sidebar.selectbox("Player", players, index=default_idx)
 
 st.title("NBA Player Load Intelligence")
 st.caption(
-    "Acute:chronic workload ratio (ACWR) from minutes played. "
-    "Sweet spot 0.8-1.3; elevated 1.3-1.5; danger >1.5."
+    "Acute:chronic workload ratio (ACWR) from minutes played, with a model that "
+    "predicts near-term absence risk. Sweet spot 0.8-1.3; danger >1.5."
 )
 
-scored = df[df["LOAD_FLAG"] != "insufficient_history"]
+scored_pl = df[df["LOAD_FLAG"] != "insufficient_history"]
 danger_pct = (
-    100 * (scored["LOAD_FLAG"] == "danger").sum() / len(scored) if len(scored) else 0
+    100 * (scored_pl["LOAD_FLAG"] == "danger").sum() / len(scored_pl)
+    if len(scored_pl) else 0
 )
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Player-games", f"{len(df):,}")
 c2.metric("Players", df["PLAYER_ID"].nunique())
-c3.metric("Scored games", f"{len(scored):,}")
+c3.metric("Scored games", f"{len(scored_pl):,}")
 c4.metric("In danger zone", f"{danger_pct:.1f}%")
 
 st.divider()
 
-st.subheader("Current risk board")
-st.caption("Each player's most recent game in the selected window, highest ACWR first.")
-
-latest = (
-    df.sort_values("GAME_DATE")
-    .groupby("PLAYER_NAME", as_index=False)
-    .last()[["PLAYER_NAME", "GAME_DATE", "MIN", "ACWR", "REST_DAYS", "LOAD_FLAG"]]
-)
-latest = latest[latest["LOAD_FLAG"] != "insufficient_history"]
-latest = latest.sort_values("ACWR", ascending=False)
-latest["GAME_DATE"] = latest["GAME_DATE"].dt.date
-latest = latest.rename(columns={
-    "PLAYER_NAME": "Player", "GAME_DATE": "Last game", "MIN": "Min",
-    "ACWR": "ACWR", "REST_DAYS": "Rest days", "LOAD_FLAG": "Flag",
-})
+# --- Predicted risk board ---------------------------------------------------
+st.subheader("Predicted risk board")
 
 
 def _color_flag(val):
     return f"color: {FLAG_COLORS.get(val, '#000')}; font-weight: 600;"
 
 
-st.dataframe(
-    latest.style.format({"ACWR": "{:.2f}", "Min": "{:.0f}"})
-    .map(_color_flag, subset=["Flag"]),
-    use_container_width=True,
-    hide_index=True,
-)
+if scored is not None:
+    s = scored if season == "All" else scored[scored["SEASON"] == season]
+    if team != "All" and "TEAM_ABBREVIATION" in s.columns:
+        s = s[s["TEAM_ABBREVIATION"] == team]
+
+    cols = ["PLAYER_NAME"]
+    if "TEAM_ABBREVIATION" in s.columns:
+        cols.append("TEAM_ABBREVIATION")
+    cols += ["GAME_DATE", "MIN", "ACWR", "REST_DAYS", "LOAD_FLAG", "RISK_PROBA"]
+
+    latest = (
+        s.sort_values("GAME_DATE")
+        .groupby("PLAYER_NAME", as_index=False)
+        .last()[cols]
+        .sort_values("RISK_PROBA", ascending=False)
+    )
+    st.caption("Each player's most recent game, ranked by the model's predicted "
+               "probability of an upcoming absence.")
+    latest["GAME_DATE"] = latest["GAME_DATE"].dt.date
+    latest["RISK_PROBA"] = (latest["RISK_PROBA"] * 100).round(1)
+    latest = latest.rename(columns={
+        "PLAYER_NAME": "Player", "TEAM_ABBREVIATION": "Team",
+        "GAME_DATE": "Last game", "MIN": "Min", "ACWR": "ACWR",
+        "REST_DAYS": "Rest days", "LOAD_FLAG": "Flag", "RISK_PROBA": "Risk %",
+    })
+    st.dataframe(
+        latest.style.format({"ACWR": "{:.2f}", "Min": "{:.0f}", "Risk %": "{:.1f}"})
+        .map(_color_flag, subset=["Flag"])
+        .background_gradient(subset=["Risk %"], cmap="Reds"),
+        use_container_width=True, hide_index=True,
+    )
+else:
+    st.info("Train and score the model to enable predicted risk: "
+            "`python -m src.model.train` then `python -m src.model.score`.")
+    latest = (
+        df.sort_values("GAME_DATE")
+        .groupby("PLAYER_NAME", as_index=False)
+        .last()[["PLAYER_NAME", "GAME_DATE", "MIN", "ACWR", "REST_DAYS", "LOAD_FLAG"]]
+    )
+    latest = latest[latest["LOAD_FLAG"] != "insufficient_history"]
+    latest = latest.sort_values("ACWR", ascending=False)
+    latest["GAME_DATE"] = latest["GAME_DATE"].dt.date
+    st.dataframe(latest, use_container_width=True, hide_index=True)
 
 st.divider()
 
+# --- Player detail ----------------------------------------------------------
 st.subheader(f"Load trend — {player}")
 
 pdf = df[df["PLAYER_NAME"] == player].sort_values("GAME_DATE")
@@ -149,10 +189,7 @@ st.plotly_chart(mfig, use_container_width=True)
 st.divider()
 
 st.subheader("Load-flag distribution")
-counts = (
-    df["LOAD_FLAG"].value_counts()
-    .reindex(FLAG_ORDER).fillna(0).astype(int)
-)
+counts = df["LOAD_FLAG"].value_counts().reindex(FLAG_ORDER).fillna(0).astype(int)
 dfig = go.Figure(go.Bar(
     x=counts.index, y=counts.values,
     marker_color=[FLAG_COLORS[f] for f in counts.index],

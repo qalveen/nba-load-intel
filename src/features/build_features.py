@@ -16,6 +16,7 @@ FEATURE_COLS = [
     "MIN", "REST_DAYS", "IS_B2B", "ACWR", "ACUTE_LOAD", "CHRONIC_LOAD",
     "GAMES_IN_CHRONIC", "GAMES_LAST_7D", "GAMES_LAST_14D", "B2B_LAST_14D",
     "CUM_SEASON_MIN", "GAME_NUM", "AVG_MIN_SEASON", "MIN_VS_AVG",
+    "AGE", "PLAYER_WEIGHT", "PLAYER_HEIGHT_INCHES",
 ]
 
 
@@ -52,6 +53,17 @@ def run():
 
     tbl = tbl[tbl["TARGET"].notna()].copy()
     tbl["TARGET"] = tbl["TARGET"].astype(int)
+
+    bio_path = config.BRONZE_DIR / "player_bio.parquet"
+    if bio_path.exists():
+        bio = read_parquet(bio_path)
+        tbl = tbl.merge(bio, on=["PLAYER_ID", "SEASON"], how="left")
+        log.info("joined player bio (age); AGE null rate %.1f%%",
+                 100 * tbl["AGE"].isna().mean())
+    else:
+        log.warning("player_bio.parquet missing -- run src.ingest.player_bio")
+        for c in ["AGE", "PLAYER_WEIGHT", "PLAYER_HEIGHT_INCHES"]:
+            tbl[c] = np.nan
 
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
     write_layer(tbl, FEATURES_DIR, "model_table")
