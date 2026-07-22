@@ -16,8 +16,6 @@ live decision dashboard — orchestrated and scheduled like a production system.
 > How does accumulated physical load affect an NBA player, and can we predict
 > when one is heading toward a fatigue-driven absence — early enough to rest them?
 
-The platform spans four disciplines in one codebase: data engineering, data
-science, analytics, and ML engineering — on a single coherent problem.
 
 ## Architecture
 
